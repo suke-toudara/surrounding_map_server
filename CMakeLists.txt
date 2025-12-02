@@ -8,6 +8,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -25,13 +26,38 @@ include_directories(
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
-# pcd_range_publisher_node
+# Create component library
+add_library(pcd_range_publisher_component SHARED
+  src/pcd_range_publisher_node.cpp
+)
+
+ament_target_dependencies(pcd_range_publisher_component
+  rclcpp
+  rclcpp_components
+  sensor_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  pcl_ros
+  pcl_conversions
+)
+
+target_link_libraries(pcd_range_publisher_component
+  ${PCL_LIBRARIES}
+)
+
+# Register the component with class_loader
+rclcpp_components_register_nodes(pcd_range_publisher_component "pcd_range_publisher::PcdRangePublisherNode")
+
+# Create standalone executable
 add_executable(pcd_range_publisher_node
   src/pcd_range_publisher_node.cpp
 )
 
 ament_target_dependencies(pcd_range_publisher_node
   rclcpp
+  rclcpp_components
   sensor_msgs
   geometry_msgs
   tf2
@@ -43,6 +69,13 @@ ament_target_dependencies(pcd_range_publisher_node
 
 target_link_libraries(pcd_range_publisher_node
   ${PCL_LIBRARIES}
+)
+
+install(TARGETS
+  pcd_range_publisher_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
 install(TARGETS
