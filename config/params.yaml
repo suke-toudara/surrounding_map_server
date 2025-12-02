@@ -1,0 +1,26 @@
+pcd_range_publisher:
+  ros__parameters:
+    # Path to the PCD map file (required)
+    pcd_file_path: "/path/to/your/map.pcd"
+
+    # Publishing rate in Hz
+    # Higher values = more frequent updates but more CPU usage
+    publish_rate: 1.0
+
+    # Radius around the robot position to extract points (in meters)
+    # Larger values = more points published but more processing
+    range_radius: 50.0
+
+    # Voxel grid filter leaf size (in meters)
+    # Larger values = lower resolution but less points (memory/bandwidth efficient)
+    # Set to 0.0 to disable voxel filtering
+    voxel_leaf_size: 0.2
+
+    # Frame IDs
+    map_frame_id: "map"
+    base_link_frame: "base_link"
+
+    # Octree resolution for spatial indexing (in meters)
+    # Larger values = less memory but less precise spatial search
+    # Should be roughly equal to or larger than voxel_leaf_size
+    octree_resolution: 1.0
