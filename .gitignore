@@ -1,0 +1,21 @@
+# Build directories
+build/
+install/
+log/
+
+# IDE
+.vscode/
+.idea/
+
+# Compiled files
+*.o
+*.so
+*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ROS
+devel/
