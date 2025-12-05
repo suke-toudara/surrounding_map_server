@@ -17,12 +17,12 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
 {
   // Declare and get parameters
   this->declare_parameter("pcd_file_path", "");
-  this->declare_parameter("publish_rate", 1.0);
-  this->declare_parameter("range_radius", 50.0);
+  this->declare_parameter("publish_rate", 0.1);  // 10 seconds interval (0.1 Hz)
+  this->declare_parameter("range_radius", 100.0);  // 100 meters
   this->declare_parameter("voxel_leaf_size", 0.2);
   this->declare_parameter("map_frame_id", "map");
   this->declare_parameter("base_link_frame", "base_link");
-  this->declare_parameter("octree_resolution", 1.0);
+  this->declare_parameter("chunk_size", 10000);  // Points per chunk
 
   pcd_file_path_ = this->get_parameter("pcd_file_path").as_string();
   publish_rate_ = this->get_parameter("publish_rate").as_double();
@@ -30,7 +30,7 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
   voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
   map_frame_id_ = this->get_parameter("map_frame_id").as_string();
   base_link_frame_ = this->get_parameter("base_link_frame").as_string();
-  octree_resolution_ = this->get_parameter("octree_resolution").as_double();
+  chunk_size_ = this->get_parameter("chunk_size").as_int();
 
   // Validate parameters
   if (pcd_file_path_.empty()) {
@@ -40,21 +40,25 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
 
   RCLCPP_INFO(this->get_logger(), "Parameters:");
   RCLCPP_INFO(this->get_logger(), "  pcd_file_path: %s", pcd_file_path_.c_str());
-  RCLCPP_INFO(this->get_logger(), "  publish_rate: %.2f Hz", publish_rate_);
+  RCLCPP_INFO(this->get_logger(), "  publish_rate: %.2f Hz (%.1f seconds interval)",
+    publish_rate_, 1.0 / publish_rate_);
   RCLCPP_INFO(this->get_logger(), "  range_radius: %.2f m", range_radius_);
   RCLCPP_INFO(this->get_logger(), "  voxel_leaf_size: %.3f m", voxel_leaf_size_);
   RCLCPP_INFO(this->get_logger(), "  map_frame_id: %s", map_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_link_frame: %s", base_link_frame_.c_str());
-  RCLCPP_INFO(this->get_logger(), "  octree_resolution: %.2f m", octree_resolution_);
+  RCLCPP_INFO(this->get_logger(), "  chunk_size: %d points", chunk_size_);
 
-  // Initialize PCL components
-  map_cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
-
-  // Load PCD map
-  loadPcdMap();
-
-  // Build octree for efficient spatial search
-  buildOctree();
+  // Initialize memory-mapped PCD reader with chunk-based reading
+  RCLCPP_INFO(this->get_logger(), "Initializing memory-mapped PCD reader (chunk-based)...");
+  try {
+    pcd_reader_ = std::make_unique<PcdMmapReader>(pcd_file_path_, chunk_size_);
+    RCLCPP_INFO(this->get_logger(),
+      "Successfully mapped PCD file with %zu points using mmap() - memory efficient mode",
+      pcd_reader_->getTotalPoints());
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to initialize PCD reader: %s", e.what());
+    throw;
+  }
 
   // Initialize TF2
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -73,71 +77,27 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
   RCLCPP_INFO(this->get_logger(), "PCD Range Publisher initialized successfully");
 }
 
-void PcdRangePublisherNode::loadPcdMap()
-{
-  RCLCPP_INFO(this->get_logger(), "Loading PCD map from: %s", pcd_file_path_.c_str());
-
-  if (pcl::io::loadPCDFile<pcl::PointXYZ>(pcd_file_path_, *map_cloud_) == -1) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to load PCD file: %s", pcd_file_path_.c_str());
-    throw std::runtime_error("Failed to load PCD file");
-  }
-
-  RCLCPP_INFO(
-    this->get_logger(),
-    "Successfully loaded PCD map with %zu points",
-    map_cloud_->points.size());
-
-  // Remove NaN points to avoid issues
-  std::vector<int> indices;
-  pcl::removeNaNFromPointCloud(*map_cloud_, *map_cloud_, indices);
-
-  RCLCPP_INFO(
-    this->get_logger(),
-    "After removing NaN: %zu points",
-    map_cloud_->points.size());
-}
-
-void PcdRangePublisherNode::buildOctree()
-{
-  RCLCPP_INFO(this->get_logger(), "Building octree with resolution: %.2f m", octree_resolution_);
-
-  octree_ = std::make_shared<pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>>(
-    octree_resolution_);
-
-  octree_->setInputCloud(map_cloud_);
-  octree_->addPointsFromInputCloud();
-
-  RCLCPP_INFO(this->get_logger(), "Octree built successfully");
-}
 
 void PcdRangePublisherNode::extractSurroundingPointCloud(
   const geometry_msgs::msg::TransformStamped & transform,
   pcl::PointCloud<pcl::PointXYZ>::Ptr & output_cloud)
 {
   // Get robot position
-  pcl::PointXYZ search_point;
-  search_point.x = transform.transform.translation.x;
-  search_point.y = transform.transform.translation.y;
-  search_point.z = transform.transform.translation.z;
+  float center_x = transform.transform.translation.x;
+  float center_y = transform.transform.translation.y;
+  float center_z = transform.transform.translation.z;
 
-  // Use octree for radius search - this is memory efficient
-  std::vector<int> point_indices;
-  std::vector<float> point_distances;
-
-  octree_->radiusSearch(
-    search_point,
-    range_radius_,
-    point_indices,
-    point_distances);
-
-  // Extract points within range
+  // Use mmap-based reader to get points within range
   pcl::PointCloud<pcl::PointXYZ>::Ptr range_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-  pcl::copyPointCloud(*map_cloud_, point_indices, *range_cloud);
+  size_t num_points = pcd_reader_->getPointsInRange(
+    center_x, center_y, center_z,
+    range_radius_,
+    range_cloud);
 
   RCLCPP_DEBUG(
     this->get_logger(),
-    "Extracted %zu points within %.2f m radius",
-    range_cloud->points.size(),
+    "Extracted %zu points within %.2f m radius using mmap()",
+    num_points,
     range_radius_);
 
   // Apply voxel grid filter for resolution control

@@ -29,6 +29,7 @@ add_definitions(${PCL_DEFINITIONS})
 # Create component library
 add_library(pcd_range_publisher_component SHARED
   src/pcd_range_publisher_node.cpp
+  src/pcd_mmap_reader.cpp
 )
 
 ament_target_dependencies(pcd_range_publisher_component
@@ -53,6 +54,7 @@ rclcpp_components_register_nodes(pcd_range_publisher_component "pcd_range_publis
 # Create standalone executable
 add_executable(pcd_range_publisher_node
   src/pcd_range_publisher_node.cpp
+  src/pcd_mmap_reader.cpp
 )
 
 ament_target_dependencies(pcd_range_publisher_node
