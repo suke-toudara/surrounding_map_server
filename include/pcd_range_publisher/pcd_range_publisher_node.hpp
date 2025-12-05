@@ -37,7 +37,7 @@ private:
   double voxel_leaf_size_;
   std::string map_frame_id_;
   std::string base_link_frame_;
-  double octree_resolution_;
+  int chunk_size_;  // Number of points to read per chunk
 
   // ROS2 components
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;

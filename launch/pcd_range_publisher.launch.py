@@ -44,12 +44,19 @@ def generate_launch_description():
         description='Voxel grid filter leaf size (meters)'
     )
 
+    chunk_size_arg = DeclareLaunchArgument(
+        'chunk_size',
+        default_value='10000',
+        description='Number of points to read per chunk for memory efficiency'
+    )
+
     # Get launch configurations
     config_file = LaunchConfiguration('config_file')
     pcd_file = LaunchConfiguration('pcd_file')
     publish_rate = LaunchConfiguration('publish_rate')
     range_radius = LaunchConfiguration('range_radius')
     voxel_leaf_size = LaunchConfiguration('voxel_leaf_size')
+    chunk_size = LaunchConfiguration('chunk_size')
 
     # Node
     pcd_range_publisher_node = Node(
@@ -64,6 +71,7 @@ def generate_launch_description():
                 'publish_rate': publish_rate,
                 'range_radius': range_radius,
                 'voxel_leaf_size': voxel_leaf_size,
+                'chunk_size': chunk_size,
             }
         ],
         remappings=[
@@ -77,5 +85,6 @@ def generate_launch_description():
         publish_rate_arg,
         range_radius_arg,
         voxel_leaf_size_arg,
+        chunk_size_arg,
         pcd_range_publisher_node,
     ])

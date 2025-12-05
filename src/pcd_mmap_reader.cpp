@@ -13,7 +13,7 @@
 namespace pcd_range_publisher
 {
 
-PcdMmapReader::PcdMmapReader(const std::string & file_path, double octree_resolution)
+PcdMmapReader::PcdMmapReader(const std::string & file_path, size_t chunk_size)
 : file_path_(file_path),
   fd_(-1),
   mapped_data_(nullptr),
@@ -22,10 +22,10 @@ PcdMmapReader::PcdMmapReader(const std::string & file_path, double octree_resolu
   data_format_(BINARY),
   num_points_(0),
   point_step_(0),
+  chunk_size_(chunk_size),
   x_field_idx_(-1),
   y_field_idx_(-1),
-  z_field_idx_(-1),
-  octree_resolution_(octree_resolution)
+  z_field_idx_(-1)
 {
   // Open file
   fd_ = open(file_path_.c_str(), O_RDONLY);
@@ -41,18 +41,18 @@ PcdMmapReader::PcdMmapReader(const std::string & file_path, double octree_resolu
   }
   file_size_ = sb.st_size;
 
-  // Memory map the file
+  // Memory map the file - this doesn't load data into memory yet
   mapped_data_ = mmap(nullptr, file_size_, PROT_READ, MAP_PRIVATE, fd_, 0);
   if (mapped_data_ == MAP_FAILED) {
     close(fd_);
     throw std::runtime_error("Failed to mmap file: " + file_path_);
   }
 
+  // Advise kernel that we'll access data sequentially
+  madvise(mapped_data_, file_size_, MADV_SEQUENTIAL);
+
   // Parse header to get metadata
   parseHeader();
-
-  // Build octree index for efficient spatial queries
-  buildOctreeIndex();
 }
 
 PcdMmapReader::~PcdMmapReader()
@@ -158,33 +158,6 @@ void PcdMmapReader::parseHeader()
   }
 }
 
-void PcdMmapReader::buildOctreeIndex()
-{
-  // Create point cloud to store only coordinates for octree
-  index_cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
-  index_cloud_->points.reserve(num_points_);
-
-  // Read all point coordinates
-  for (size_t i = 0; i < num_points_; ++i) {
-    pcl::PointXYZ point;
-    if (readPoint(i, point)) {
-      // Skip invalid points
-      if (std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z)) {
-        index_cloud_->points.push_back(point);
-      }
-    }
-  }
-
-  index_cloud_->width = index_cloud_->points.size();
-  index_cloud_->height = 1;
-  index_cloud_->is_dense = false;
-
-  // Build octree
-  octree_ = std::make_shared<pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>>(
-    octree_resolution_);
-  octree_->setInputCloud(index_cloud_);
-  octree_->addPointsFromInputCloud();
-}
 
 bool PcdMmapReader::readPoint(size_t index, pcl::PointXYZ & point)
 {
@@ -267,23 +240,42 @@ size_t PcdMmapReader::getPointsInRange(
     return 0;
   }
 
-  // Create search point
-  pcl::PointXYZ search_point(center_x, center_y, center_z);
-
-  // Use octree for radius search
-  std::vector<int> point_indices;
-  std::vector<float> point_distances;
-
-  octree_->radiusSearch(search_point, radius, point_indices, point_distances);
-
-  // Extract points using the indices
   output_cloud->points.clear();
-  output_cloud->points.reserve(point_indices.size());
+  const float radius_sq = radius * radius;  // Compare squared distances to avoid sqrt
 
-  for (int idx : point_indices) {
-    if (idx >= 0 && static_cast<size_t>(idx) < index_cloud_->points.size()) {
-      // We can directly use the point from index_cloud since we only store valid points
-      output_cloud->points.push_back(index_cloud_->points[idx]);
+  // Process points in chunks to minimize memory usage
+  for (size_t chunk_start = 0; chunk_start < num_points_; chunk_start += chunk_size_) {
+    size_t chunk_end = std::min(chunk_start + chunk_size_, num_points_);
+
+    // Read points in this chunk
+    for (size_t i = chunk_start; i < chunk_end; ++i) {
+      pcl::PointXYZ point;
+      if (readPoint(i, point)) {
+        // Skip invalid points
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
+          continue;
+        }
+
+        // Calculate squared distance
+        float dx = point.x - center_x;
+        float dy = point.y - center_y;
+        float dz = point.z - center_z;
+        float dist_sq = dx * dx + dy * dy + dz * dz;
+
+        // Only keep points within range
+        if (dist_sq <= radius_sq) {
+          output_cloud->points.push_back(point);
+        }
+      }
+    }
+
+    // Hint to OS that we're done with this chunk (can be paged out)
+    // Calculate chunk memory region
+    if (data_format_ == BINARY) {
+      size_t chunk_offset = data_offset_ + chunk_start * point_step_;
+      size_t chunk_size_bytes = (chunk_end - chunk_start) * point_step_;
+      madvise(static_cast<char*>(mapped_data_) + chunk_offset,
+              chunk_size_bytes, MADV_DONTNEED);
     }
   }
 

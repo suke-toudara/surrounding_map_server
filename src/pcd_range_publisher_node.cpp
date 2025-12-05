@@ -22,7 +22,7 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
   this->declare_parameter("voxel_leaf_size", 0.2);
   this->declare_parameter("map_frame_id", "map");
   this->declare_parameter("base_link_frame", "base_link");
-  this->declare_parameter("octree_resolution", 1.0);
+  this->declare_parameter("chunk_size", 10000);  // Points per chunk
 
   pcd_file_path_ = this->get_parameter("pcd_file_path").as_string();
   publish_rate_ = this->get_parameter("publish_rate").as_double();
@@ -30,7 +30,7 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
   voxel_leaf_size_ = this->get_parameter("voxel_leaf_size").as_double();
   map_frame_id_ = this->get_parameter("map_frame_id").as_string();
   base_link_frame_ = this->get_parameter("base_link_frame").as_string();
-  octree_resolution_ = this->get_parameter("octree_resolution").as_double();
+  chunk_size_ = this->get_parameter("chunk_size").as_int();
 
   // Validate parameters
   if (pcd_file_path_.empty()) {
@@ -46,13 +46,14 @@ PcdRangePublisherNode::PcdRangePublisherNode(const rclcpp::NodeOptions & options
   RCLCPP_INFO(this->get_logger(), "  voxel_leaf_size: %.3f m", voxel_leaf_size_);
   RCLCPP_INFO(this->get_logger(), "  map_frame_id: %s", map_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_link_frame: %s", base_link_frame_.c_str());
-  RCLCPP_INFO(this->get_logger(), "  octree_resolution: %.2f m", octree_resolution_);
+  RCLCPP_INFO(this->get_logger(), "  chunk_size: %d points", chunk_size_);
 
-  // Initialize memory-mapped PCD reader
-  RCLCPP_INFO(this->get_logger(), "Initializing memory-mapped PCD reader...");
+  // Initialize memory-mapped PCD reader with chunk-based reading
+  RCLCPP_INFO(this->get_logger(), "Initializing memory-mapped PCD reader (chunk-based)...");
   try {
-    pcd_reader_ = std::make_unique<PcdMmapReader>(pcd_file_path_, octree_resolution_);
-    RCLCPP_INFO(this->get_logger(), "Successfully loaded PCD file with %zu points using mmap()",
+    pcd_reader_ = std::make_unique<PcdMmapReader>(pcd_file_path_, chunk_size_);
+    RCLCPP_INFO(this->get_logger(),
+      "Successfully mapped PCD file with %zu points using mmap() - memory efficient mode",
       pcd_reader_->getTotalPoints());
   } catch (const std::exception & e) {
     RCLCPP_ERROR(this->get_logger(), "Failed to initialize PCD reader: %s", e.what());

@@ -8,7 +8,6 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/octree/octree_search.h>
 
 namespace pcd_range_publisher
 {
@@ -17,8 +16,8 @@ namespace pcd_range_publisher
  * @brief Memory-mapped PCD file reader for efficient point cloud access
  *
  * This class uses mmap() to map PCD files into memory without loading all data at once.
- * It builds an octree index for efficient spatial queries and only loads point data
- * when needed.
+ * It reads points in chunks and only keeps points within the specified range,
+ * minimizing memory usage.
  */
 class PcdMmapReader
 {
@@ -26,9 +25,9 @@ public:
   /**
    * @brief Constructor
    * @param file_path Path to the PCD file
-   * @param octree_resolution Resolution for the octree spatial index
+   * @param chunk_size Number of points to read at once (default: 10000)
    */
-  PcdMmapReader(const std::string & file_path, double octree_resolution);
+  PcdMmapReader(const std::string & file_path, size_t chunk_size = 10000);
 
   /**
    * @brief Destructor - unmaps the file
@@ -70,11 +69,6 @@ private:
   void parseHeader();
 
   /**
-   * @brief Build octree index for spatial queries
-   */
-  void buildOctreeIndex();
-
-  /**
    * @brief Read a single point from the mapped memory
    * @param index Point index
    * @param point Output point
@@ -94,6 +88,7 @@ private:
   DataFormat data_format_;
   size_t num_points_;
   size_t point_step_;         // Bytes per point
+  size_t chunk_size_;         // Number of points to read per chunk
 
   // Field information
   struct FieldInfo {
@@ -106,11 +101,6 @@ private:
   int x_field_idx_;
   int y_field_idx_;
   int z_field_idx_;
-
-  // Octree for spatial indexing
-  pcl::PointCloud<pcl::PointXYZ>::Ptr index_cloud_;  // Only stores coordinates for octree
-  std::shared_ptr<pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>> octree_;
-  double octree_resolution_;
 };
 
 }  // namespace pcd_range_publisher
