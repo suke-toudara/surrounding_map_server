@@ -28,13 +28,13 @@ def generate_launch_description():
 
     publish_rate_arg = DeclareLaunchArgument(
         'publish_rate',
-        default_value='1.0',
-        description='Publishing rate in Hz'
+        default_value='0.1',
+        description='Publishing rate in Hz (0.1 Hz = 10 seconds interval)'
     )
 
     range_radius_arg = DeclareLaunchArgument(
         'range_radius',
-        default_value='50.0',
+        default_value='100.0',
         description='Radius around robot to extract points (meters)'
     )
 
